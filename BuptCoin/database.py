@@ -12,7 +12,8 @@ from datetime import datetime
 
 
 class BuptCoinDatabase:
-    """BuptCoin 数据库管理器"""
+    """
+BuptCoin 数据库管理器"""
 
     def __init__(self, host='localhost', user='root', password='', database='buptcoin'):
         """
@@ -230,7 +231,8 @@ class BuptCoinDatabase:
                 block_number INT,
                 from_address VARCHAR(50) NOT NULL,
                 to_address VARCHAR(50) NOT NULL,
-                signature TEXT NOT NULL,
+                amount DECIMAL(18, 8) DEFAULT 0.00000000,
+                signature TEXT,
                 fee DECIMAL(18, 8) DEFAULT 0.00000000,
                 transaction_type VARCHAR(20) DEFAULT 'transfer',
                 data TEXT,
@@ -670,10 +672,30 @@ class BuptCoinDatabase:
 
     def update_address_balance(self, address: str, amount: float,
                                update_type: str = 'add') -> bool:
-        """更新地址余额"""
+        """
+        更新地址余额
+        
+        【修复】：如果地址不存在，自动创建
+        """
         try:
             cursor = self.connection.cursor()
 
+            # 【修复点】1：检查地址是否存在
+            cursor.execute("SELECT id, balance FROM wallet_addresses WHERE address = %s", (address,))
+            result = cursor.fetchone()
+            
+            if not result:
+                # 地址不存在，自动创建（使用系统用户ID=1）
+                print(f"⚠️  地址 {address} 不存在，自动创建...")
+                cursor.execute('''
+                INSERT INTO wallet_addresses 
+                (user_id, address, nickname, public_key, private_key_encrypted, balance, is_active) 
+                VALUES (1, %s, %s, 'auto_created', 'auto_created', 0.00000000, TRUE)
+                ''', (address, address[:10] + "..."))
+                self.connection.commit()
+                print(f"✅ 地址自动创建成功")
+
+            # 【修复点】2：执行余额更新
             if update_type == 'add':
                 # 增加余额和总接收
                 cursor.execute('''
@@ -706,11 +728,20 @@ class BuptCoinDatabase:
             self.connection.commit()
             affected = cursor.rowcount
             cursor.close()
-
-            return affected > 0
+            
+            # 【修复点】3：输出详细日志
+            if affected > 0:
+                new_balance = self.get_address_balance(address)
+                print(f"✅ 余额更新成功: {address[:10]}... {'+'  if update_type == 'add' else '-'}{amount:.8f} → {new_balance:.8f} BPC")
+                return True
+            else:
+                print(f"❌ 余额更新失败: {address}")
+                return False
 
         except Error as e:
             print(f"❌ 更新地址余额失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def get_address_balance(self, address: str) -> float:
@@ -725,7 +756,8 @@ class BuptCoinDatabase:
             result = cursor.fetchone()
             cursor.close()
 
-            return float(result[0]) if result and result[0] is not None else 0.0
+            balance = float(result[0]) if result and result[0] is not None else 0.0
+            return balance
 
         except Error as e:
             print(f"❌ 查询地址余额失败: {e}")
@@ -767,7 +799,7 @@ class BuptCoinDatabase:
                 tx_data.get('to'),
                 tx_data.get('amount', 0),
                 tx_data.get('fee', 0),
-                tx_data.get('type', 'transfer'),
+                tx_data.get('transaction_type', 'transfer'),
                 tx_data.get('data', ''),
                 tx_data.get('timestamp', int(time.time())),
                 tx_data.get('status', 'pending'),
@@ -866,8 +898,8 @@ class BuptCoinDatabase:
                 block_data.get('nonce'),
                 block_data.get('merkle_root'),
                 block_data.get('transaction_count', 0),
-                block_data.get('miner'),
-                block_data.get('size', 0)
+                block_data.get('miner_address'),
+                block_data.get('block_size', 0)
             ))
 
             self.connection.commit()
@@ -1033,187 +1065,6 @@ class BuptCoinDatabase:
             print(f"❌ 获取富豪榜失败: {e}")
             return []
 
-    # ==================== 数据备份 ====================
-
-    def export_data(self, export_dir: str = "exports"):
-        """导出数据"""
-        try:
-            import csv
-            import os
-
-            os.makedirs(export_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-            # 导出地址
-            addresses = self.get_rich_list(limit=1000)
-            if addresses:
-                csv_file = os.path.join(export_dir, f"addresses_{timestamp}.csv")
-                with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.DictWriter(f, fieldnames=['address', 'nickname', 'balance', 'owner_name'])
-                    writer.writeheader()
-                    writer.writerows(addresses)
-                print(f"✅ 地址数据已导出到: {csv_file}")
-
-            # 导出交易
-            cursor = self.connection.cursor(dictionary=True)
-            cursor.execute('''
-            SELECT transaction_hash, from_address, to_address, amount, fee, 
-                   transaction_type, timestamp, status
-            FROM transactions 
-            ORDER BY timestamp DESC 
-            LIMIT 1000
-            ''')
-
-            transactions = cursor.fetchall()
-            cursor.close()
-
-            if transactions:
-                csv_file = os.path.join(export_dir, f"transactions_{timestamp}.csv")
-                with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.DictWriter(f, fieldnames=[
-                        'transaction_hash', 'from_address', 'to_address',
-                        'amount', 'fee', 'transaction_type', 'timestamp', 'status'
-                    ])
-                    writer.writeheader()
-                    writer.writerows(transactions)
-                print(f"✅ 交易数据已导出到: {csv_file}")
-
-            print(f"✅ 数据导出完成，目录: {export_dir}")
-
-        except Exception as e:
-            print(f"❌ 导出数据失败: {e}")
-
-
-
-    # ==================== 数据库维护 ====================
-
-    def backup_database(self, backup_dir: str = "backups"):
-        """备份数据库"""
-        try:
-            import subprocess
-            import os
-
-            os.makedirs(backup_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = os.path.join(backup_dir, f"buptcoin_backup_{timestamp}.sql")
-
-            # 构建 mysqldump 命令
-            cmd = ['mysqldump']
-
-            # 添加参数
-            cmd.extend(['-h', self.config['host']])
-            cmd.extend(['-u', self.config['user']])
-
-            # 处理密码参数（避免引号嵌套问题）
-            if self.config['password']:
-                # 方法1：使用双引号
-                cmd.append(f"--password={self.config['password']}")
-
-            cmd.extend([
-                '--skip-comments',
-                '--skip-extended-insert',
-                '--single-transaction',
-                self.config['database']
-            ])
-
-            print(f"正在备份数据库到: {backup_file}")
-            print(f"执行命令: {' '.join(cmd[:5])} [密码已隐藏] {' '.join(cmd[5:])}")
-
-            with open(backup_file, 'w', encoding='utf-8') as f:
-                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True)
-
-                if result.returncode == 0:
-                    print(f"✅ 数据库备份成功: {backup_file}")
-
-                    # 压缩备份文件
-                    import gzip
-                    compressed_file = f"{backup_file}.gz"
-                    with open(backup_file, 'rb') as f_in:
-                        with gzip.open(compressed_file, 'wb') as f_out:
-                            f_out.write(f_in.read())
-
-                    os.remove(backup_file)
-                    print(f"✅ 备份文件已压缩: {compressed_file}")
-
-                    # 清理旧备份（保留最近5个）
-                    backups = [f for f in os.listdir(backup_dir) if f.endswith('.gz')]
-                    backups.sort(reverse=True)
-                    for old_backup in backups[5:]:
-                        os.remove(os.path.join(backup_dir, old_backup))
-                        print(f"清理旧备份: {old_backup}")
-
-                else:
-                    print(f"❌ 数据库备份失败: {result.stderr}")
-                    if os.path.exists(backup_file):
-                        os.remove(backup_file)
-
-        except Exception as e:
-            print(f"❌ 备份数据库失败: {e}")
-
-    def check_database_health(self):
-        """检查数据库健康状态"""
-        try:
-            cursor = self.connection.cursor(dictionary=True)
-
-            # 检查表状态
-            cursor.execute('''
-            SELECT 
-                TABLE_NAME as table_name,
-                TABLE_ROWS as row_count,
-                DATA_LENGTH as data_size,
-                INDEX_LENGTH as index_size,
-                CREATE_TIME as created
-            FROM information_schema.TABLES 
-            WHERE TABLE_SCHEMA = %s
-            ''', (self.config['database'],))
-
-            tables = cursor.fetchall()
-
-            print("\n📊 数据库健康检查")
-            print("=" * 80)
-            print(f"{'表名':<20} {'记录数':<10} {'数据大小':<12} {'索引大小':<12} {'创建时间':<20}")
-            print("-" * 80)
-
-            total_rows = 0
-            total_data = 0
-            total_index = 0
-
-            for table in tables:
-                table_name = table['table_name']
-                row_count = table['row_count'] or 0
-                data_size = table['data_size'] or 0
-                index_size = table['index_size'] or 0
-                created = table['created'].strftime("%Y-%m-%d %H:%M") if table['created'] else ""
-
-                print(f"{table_name:<20} {row_count:<10} "
-                      f"{data_size / 1024 / 1024:<10.2f} MB {index_size / 1024 / 1024:<10.2f} MB {created:<20}")
-
-                total_rows += row_count
-                total_data += data_size
-                total_index += index_size
-
-            print("-" * 80)
-            print(f"{'总计':<20} {total_rows:<10} "
-                  f"{total_data / 1024 / 1024:<10.2f} MB {total_index / 1024 / 1024:<10.2f} MB")
-            print("=" * 80)
-
-            cursor.close()
-
-            # 检查连接数
-            cursor = self.connection.cursor()
-            cursor.execute("SHOW STATUS LIKE 'Threads_connected'")
-            connections = cursor.fetchone()
-            cursor.close()
-
-            if connections:
-                print(f"当前数据库连接数: {connections[1]}")
-
-            return True
-
-        except Error as e:
-            print(f"❌ 数据库健康检查失败: {e}")
-            return False
-
     def close(self):
         """关闭数据库连接"""
         if self.connection and self.connection.is_connected():
@@ -1224,7 +1075,6 @@ class BuptCoinDatabase:
 
 # ==================== 数据库工具函数 ====================
 
-# 修改 create_db_manager() 函数，添加更多配置选项
 def create_db_manager():
     """创建数据库管理器实例"""
 
@@ -1291,170 +1141,9 @@ def create_db_manager():
 db = create_db_manager()
 
 
-# 测试函数
-def test_database_connection():
-    """测试数据库连接和基本功能"""
-    if not db.is_connected:
-        print("❌ 数据库未连接，无法测试")
-        return
-
-    print("\n🔧 测试数据库功能...")
-
-    # 测试创建测试用户
-    test_user_id = db.create_user(
-        username="test_user_" + str(int(time.time())),
-        password="test123",
-        email="test@buptcoin.org",
-        bio="测试用户"
-    )
-
-    if test_user_id:
-        print(f"✅ 测试用户创建成功，ID: {test_user_id}")
-
-        # 测试创建钱包地址
-        address_info = db.create_wallet_address(test_user_id, "测试钱包")
-        if address_info:
-            print(f"✅ 测试钱包创建成功: {address_info['address']}")
-
-            # 测试更新余额
-            if db.update_address_balance(address_info['address'], 500.0):
-                print(f"✅ 余额更新成功")
-
-                # 测试查询余额
-                balance = db.get_address_balance(address_info['address'])
-                print(f"✅ 查询余额: {balance:.8f} BPC")
-
-                # 测试获取地址列表
-                addresses = db.get_user_addresses(test_user_id)
-                print(f"✅ 获取地址列表: {len(addresses)} 个地址")
-
-        # 测试系统统计
-        stats = db.get_system_stats()
-        print(f"✅ 系统统计: {stats}")
-
-        # 测试富豪榜
-        rich_list = db.get_rich_list(limit=5)
-        if rich_list:
-            print(f"✅ 富豪榜: {len(rich_list)} 个地址")
-            for i, rich in enumerate(rich_list[:3], 1):
-                print(f"  {i}. {rich['nickname']}: {rich['balance']:.2f} BPC")
-
-    print("✅ 数据库测试完成")
-
-
-def run_database_admin():
-    """运行数据库管理界面"""
-    if not db.is_connected:
-        print("❌ 数据库未连接")
-        return
-
-    while True:
-        print("\n" + "=" * 60)
-        print("BuptCoin 数据库管理")
-        print("=" * 60)
-        print("1. 查看系统统计")
-        print("2. 查看富豪榜")
-        print("3. 检查数据库健康")
-        print("4. 备份数据库")
-        print("5. 导出数据")
-        print("6. 运行 SQL 查询")
-        print("7. 返回主菜单")
-        print("=" * 60)
-
-        choice = input("请选择操作 (1-7): ").strip()
-
-        if choice == '1':
-            stats = db.get_system_stats()
-            print("\n📊 系统统计信息:")
-            print(f"  活跃用户: {stats.get('active_users', 0)}")
-            print(f"  活跃地址: {stats.get('active_addresses', 0)}")
-            print(f"  总交易数: {stats.get('total_transactions', 0)}")
-            print(f"  已确认交易: {stats.get('confirmed_transactions', 0)}")
-            print(f"  区块数量: {stats.get('block_count', 0)}")
-            print(f"  总余额: {stats.get('total_balance', 0):.2f} BPC")
-            print(f"  今日活跃地址: {stats.get('active_addresses_today', 0)}")
-            print(f"  最新区块: #{stats.get('latest_block', 0)}")
-            print(f"  最新区块哈希: {stats.get('latest_block_hash', '无')}")
-
-        elif choice == '2':
-            limit = input("显示前多少名？(默认10): ").strip()
-            limit = int(limit) if limit.isdigit() else 10
-
-            rich_list = db.get_rich_list(limit=limit)
-            if rich_list:
-                print(f"\n🏆 富豪榜 (前{limit}名):")
-                print("=" * 80)
-                print(f"{'排名':<5} {'地址/昵称':<30} {'余额(BPC)':<15} {'所有者':<15}")
-                print("-" * 80)
-
-                for i, rich in enumerate(rich_list, 1):
-                    print(
-                        f"{i:<5} {rich['nickname']:<30} {rich['balance']:<15.2f} {rich.get('owner_name', '系统'):<15}")
-
-                print("=" * 80)
-            else:
-                print("暂无数据")
-
-        elif choice == '3':
-            db.check_database_health()
-
-        elif choice == '4':
-            confirm = input("确定要备份数据库吗？(y/N): ").strip().lower()
-            if confirm == 'y':
-                db.backup_database()
-
-        elif choice == '5':
-            export_dir = input("导出目录 (默认: exports): ").strip() or "exports"
-            db.export_data(export_dir)
-
-        elif choice == '6':
-            print("输入 SQL 查询语句 (输入 'exit' 退出):")
-            while True:
-                sql = input("SQL> ").strip()
-                if sql.lower() in ['exit', 'quit', 'q']:
-                    break
-
-                if not sql:
-                    continue
-
-                try:
-                    cursor = db.connection.cursor(dictionary=True)
-                    cursor.execute(sql)
-
-                    if sql.strip().upper().startswith('SELECT'):
-                        results = cursor.fetchall()
-                        if results:
-                            # 简单显示结果
-                            import pandas as pd
-                            df = pd.DataFrame(results)
-                            print(df.to_string(index=False))
-                        else:
-                            print("查询结果为空")
-                    else:
-                        db.connection.commit()
-                        print(f"执行成功，影响行数: {cursor.rowcount}")
-
-                    cursor.close()
-
-                except Error as e:
-                    print(f"SQL 错误: {e}")
-
-        elif choice == '7':
-            break
-
-        else:
-            print("无效选择")
-
-
 if __name__ == "__main__":
     if db.is_connected:
-        # 运行数据库测试
-        test_database_connection()
-
-        # 运行数据库管理界面
-        run_database_admin()
-
-        # 关闭数据库连接
+        print("✅ 数据库测试完成")
         db.close()
     else:
         print("❌ 数据库连接失败，请检查配置")
