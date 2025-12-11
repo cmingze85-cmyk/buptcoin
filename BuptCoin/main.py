@@ -1281,10 +1281,10 @@ def run_gui_interface():
         print("PyQt5 导入成功，正在启动图形界面...")
 
         # 【关键修改】改为导入 gui_enhanced 模块
-        from gui_enhanced import BlockchainGUIEnhanced
+        from gui_enhanced import BlockchainGUIEnhanced  # ✅ 这里是正确的
 
         app = QApplication(sys.argv)
-        gui = BlockchainGUIEnhanced()
+        gui = BlockchainGUIEnhanced()  # ✅ 这里也要改
         gui.show()
 
         print("图形界面启动成功！")
