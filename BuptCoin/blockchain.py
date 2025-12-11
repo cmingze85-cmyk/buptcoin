@@ -52,7 +52,7 @@ class Transaction:
             'transaction_id': self.transaction_id,
             'block_number': self.block_number,
             'status': self.status,
-            'signature': self.signature,  # 👈 【关键修正点】新增签名
+            'signature': self.signature,
         }
         return transaction_data
 
@@ -88,6 +88,39 @@ class Block:
         }
         return Utils.calculate_hash(block_data)
 
+    def mine_block(self, difficulty: int) -> None:
+        """
+        挖矿：通过不断尝试nonce值，找到满足难度要求的哈希值
+        
+        Args:
+            difficulty: 挖矿难度（哈希前缀零的个数）
+        """
+        target = '0' * difficulty
+        print(f"开始挖矿，难度: {difficulty}, 目标前缀: {target}")
+        
+        start_time = time.time()
+        attempts = 0
+        
+        while self.hash[:difficulty] != target:
+            self.nonce += 1
+            self.hash = self.calculate_hash()
+            attempts += 1
+            
+            # 每1000次尝试显示一次进度
+            if attempts % 1000 == 0:
+                elapsed = time.time() - start_time
+                rate = attempts / elapsed if elapsed > 0 else 0
+                print(f"尝试次数: {attempts}, 速度: {rate:.0f} H/s")
+        
+        elapsed = time.time() - start_time
+        rate = attempts / elapsed if elapsed > 0 else 0
+        print(f"✅ 挖矿成功！")
+        print(f"  Nonce: {self.nonce}")
+        print(f"  哈希: {self.hash}")
+        print(f"  尝试次数: {attempts}")
+        print(f"  耗时: {elapsed:.2f}秒")
+        print(f"  平均算力: {rate:.0f} H/s")
+
     def to_dict(self) -> Dict:
         """将区块对象转换为字典（包含数据库存储的所有字段）"""
         return {
@@ -99,7 +132,7 @@ class Block:
             'nonce': self.nonce,
             'merkle_root': self.merkle_tree.get_root(),
             'transaction_count': len(self.transactions),
-            'difficulty': 2,  # 可以根据实际设置
+            'difficulty': 2,
             'size': len(json.dumps([tx.to_dict() for tx in self.transactions]))
         }
 
@@ -300,7 +333,6 @@ class Blockchain:
 
         print("创世区块创建完成！")
 
-    # ==================== 修改的 add_transaction 方法 ====================
     def add_transaction(self, transaction: Transaction, signature: str = None) -> bool:
         """
         添加交易到待处理交易池并保存到数据库
@@ -365,7 +397,6 @@ class Blockchain:
 
         return True
 
-    # ==================== 修改的 mine_pending_transactions 方法 ====================
     def mine_pending_transactions(self, miner_address: str) -> bool:
         """
         挖矿：将待处理交易打包成新区块，并保存到数据库
