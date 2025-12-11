@@ -38,7 +38,7 @@ class SimpleCoinCLI:
             print(f"  活跃地址: {stats.get('active_addresses', 0)}")
             print(f"  总余额: {stats.get('total_balance', 0):.2f} BPC")
 
-            # 用户登录/o
+            # 用户登录/注册
             self.handle_user_auth()
         else:
             print("⚠️  数据库未连接，使用内存模式")
@@ -1280,12 +1280,11 @@ def run_gui_interface():
 
         print("PyQt5 导入成功，正在启动图形界面...")
 
-        # 注意：这里不需要再次导入 BlockchainGUI，因为已经在顶部导入了
-        # 但我们需要在函数内导入以避免循环导入
-        from gui import BlockchainGUI
+        # 【关键修改】改为导入 gui_enhanced 模块
+        from gui_enhanced import BlockchainGUIEnhanced
 
         app = QApplication(sys.argv)
-        gui = BlockchainGUI()
+        gui = BlockchainGUIEnhanced()
         gui.show()
 
         print("图形界面启动成功！")
@@ -1294,7 +1293,7 @@ def run_gui_interface():
         sys.exit(app.exec_())
 
     except ImportError as e:
-        print(f"错误：无法导入 PyQt5 - {e}")
+        print(f"错误：无法导入所需模块 - {e}")
         print("\n请先安装 PyQt5:")
         print("pip install PyQt5")
         print("\n现在将使用命令行界面...")
@@ -1302,34 +1301,60 @@ def run_gui_interface():
 
     except Exception as e:
         print(f"图形界面启动失败: {e}")
-        print("现在将使用命令行界面...")
+        import traceback
+        traceback.print_exc()
+        print("\n现在将使用命令行界面...")
         run_cli_interface()
 
 
 def choose_interface():
     """让用户选择界面"""
     print("\n请选择界面模式:")
-    print("1. 命令行界面 (CLI) - 文本交互，功能完整")
-    print("2. 图形界面 (GUI) - 可视化操作，简洁直观")
-    print("3. 退出程序")
+    print("1. 图形界面 (GUI) - 可视化操作，推荐使用")
+    print("2. 命令行界面 (CLI) - 文本交互，适合调试")
+    print("3. 数据库管理工具")
+    print("4. 退出程序")
 
     try:
-        choice = input("\n请选择 (1-3): ").strip()
+        choice = input("\n请选择 (1-4): ").strip()
 
         if choice == '1':
-            run_cli_interface()
-        elif choice == '2':
             run_gui_interface()
+        elif choice == '2':
+            run_cli_interface()
         elif choice == '3':
+            run_database_admin()
+        elif choice == '4':
             print("程序退出")
             sys.exit(0)
         else:
-            print("无效选择，默认使用命令行界面")
-            run_cli_interface()
+            print("无效选择，默认使用图形界面")
+            run_gui_interface()
 
     except KeyboardInterrupt:
         print("\n\n程序被用户中断")
         sys.exit(0)
+
+
+def run_database_admin():
+    """运行数据库管理工具"""
+    print("=" * 60)
+    print("BuptCoin 数据库管理工具")
+    print("=" * 60)
+
+    try:
+        from database import db, run_database_admin as run_admin
+
+        if db and db.is_connected:
+            run_admin()
+        else:
+            print("❌ 数据库未连接")
+            print("请先运行 init_database.py 初始化数据库")
+
+    except ImportError:
+        print("❌ 数据库模块不可用")
+    except Exception as e:
+        print(f"❌ 运行数据库管理工具失败: {e}")
 
 
 def show_help():
@@ -1431,56 +1456,6 @@ def main():
     else:
         # 没有参数，让用户选择
         choose_interface()
-
-
-def choose_interface():
-    """让用户选择界面"""
-    print("\n请选择界面模式:")
-    print("1. 图形界面 (GUI) - 可视化操作，推荐使用")
-    print("2. 命令行界面 (CLI) - 文本交互，适合调试")
-    print("3. 数据库管理工具")
-    print("4. 退出程序")
-
-    try:
-        choice = input("\n请选择 (1-4): ").strip()
-
-        if choice == '1':
-            run_gui_interface()
-        elif choice == '2':
-            run_cli_interface()
-        elif choice == '3':
-            run_database_admin()
-        elif choice == '4':
-            print("程序退出")
-            sys.exit(0)
-        else:
-            print("无效选择，默认使用图形界面")
-            run_gui_interface()
-
-    except KeyboardInterrupt:
-        print("\n\n程序被用户中断")
-        sys.exit(0)
-
-
-def run_database_admin():
-    """运行数据库管理工具"""
-    print("=" * 60)
-    print("BuptCoin 数据库管理工具")
-    print("=" * 60)
-
-    try:
-        from database import db, run_database_admin as run_admin
-
-        if db and db.is_connected:
-            run_admin()
-        else:
-            print("❌ 数据库未连接")
-            print("请先运行 init_database.py 初始化数据库")
-
-    except ImportError:
-        print("❌ 数据库模块不可用")
-    except Exception as e:
-        print(f"❌ 运行数据库管理工具失败: {e}")
 
 
 if __name__ == "__main__":
