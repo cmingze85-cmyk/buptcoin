@@ -401,10 +401,11 @@ class BlockchainGUIEnhanced(QMainWindow):
         self.sender_combo = QComboBox()
         trans_layout.addWidget(self.sender_combo, 0, 1, 1, 2)
 
+        # 【修复1】：接收方改为下拉框
         trans_layout.addWidget(QLabel("接收方地址:"), 1, 0)
-        self.receiver_edit = QLineEdit()
-        self.receiver_edit.setPlaceholderText("输入接收方地址")
-        trans_layout.addWidget(self.receiver_edit, 1, 1, 1, 2)
+        self.receiver_combo = QComboBox()
+        self.receiver_combo.setEditable(True)  # 允许输入自定义地址
+        trans_layout.addWidget(self.receiver_combo, 1, 1, 1, 2)
 
         trans_layout.addWidget(QLabel("转账金额 (BPC):"), 2, 0)
         self.amount_spinbox = QDoubleSpinBox()
@@ -596,7 +597,7 @@ class BlockchainGUIEnhanced(QMainWindow):
         """处理发送交易"""
         try:
             sender = self.sender_combo.currentText()
-            receiver = self.receiver_edit.text().strip()
+            receiver = self.receiver_combo.currentText().strip()  # 【修复】从下拉框获取
             amount = self.amount_spinbox.value()
 
             if not receiver or not sender:
@@ -617,7 +618,7 @@ class BlockchainGUIEnhanced(QMainWindow):
             tx = Transaction(sender, receiver, amount)
             if self.blockchain.add_transaction(tx):
                 self.status_label.setText("🟢 交易已发送")
-                self.receiver_edit.clear()
+                self.receiver_combo.setCurrentIndex(0)  # 重置为第一项
                 QApplication.beep()
                 self.update_display()
             else:
@@ -638,6 +639,9 @@ class BlockchainGUIEnhanced(QMainWindow):
                 return
 
             miner_address = self.miner_combo.currentText()
+            # 【修复3】：保存当前选择的索引
+            self.current_miner_index = self.miner_combo.currentIndex()
+            
             self.mine_btn.setEnabled(False)
             self.mining_status.setText("⛏️ 挖矿中...")
             self.status_label.setText("🟡 正在挖矿...")
@@ -662,7 +666,8 @@ class BlockchainGUIEnhanced(QMainWindow):
         else:
             self.mining_status.setText("⚠️ 挖矿失败")
 
-        self.update_display()
+        # 【修复3】：更新后恢复矿工选择
+        self.update_display(restore_miner_selection=True)
 
     def on_mining_error(self, error_msg: str):
         """挖矿错误回调"""
@@ -671,30 +676,55 @@ class BlockchainGUIEnhanced(QMainWindow):
         self.status_label.setText("🔴 挖矿出错")
         self.show_error("挖矿错误", f"挖矿过程中出错: {error_msg}")
 
-    def update_display(self):
+    def update_display(self, restore_miner_selection=False):
         """更新整个界面显示"""
         try:
+            # 保存当前矿工选择
+            if hasattr(self, 'miner_combo'):
+                current_miner_index = self.miner_combo.currentIndex()
+            
             self.update_address_lists()
             self.update_balances()
             self.update_blockchain_info()
             self.update_transaction_table()
             self.update_system_info()
+            
+            # 【修复3】：恢复矿工选择
+            if restore_miner_selection and hasattr(self, 'current_miner_index'):
+                if self.current_miner_index < self.miner_combo.count():
+                    self.miner_combo.setCurrentIndex(self.current_miner_index)
         except Exception as e:
             print(f"更新显示失败: {e}")
 
     def update_address_lists(self):
         """更新地址下拉框"""
+        # 【修复2】：去除重复的genesis
+        # 获取所有唯一地址
+        all_addresses = list(set(['genesis'] + self.wallet.addresses))
+        all_addresses.sort()  # 排序以保持一致性
+        
+        # 清空并重新填充发送方下拉框
         self.sender_combo.clear()
-        self.miner_combo.clear()
-        all_addresses = ['genesis'] + self.wallet.addresses
         for address in all_addresses:
             self.sender_combo.addItem(address)
+        
+        # 清空并重新填充接收方下拉框
+        self.receiver_combo.clear()
+        for address in all_addresses:
+            self.receiver_combo.addItem(address)
+        
+        # 清空并重新填充矿工下拉框
+        self.miner_combo.clear()
+        for address in all_addresses:
             self.miner_combo.addItem(address)
 
     def update_balances(self):
         """更新余额显示"""
         total_balance = 0
-        all_addresses = ['genesis'] + self.wallet.addresses
+        # 【修复2】：使用唯一地址列表
+        all_addresses = list(set(['genesis'] + self.wallet.addresses))
+        all_addresses.sort()
+        
         self.balance_table.setRowCount(len(all_addresses))
 
         for i, address in enumerate(all_addresses):
@@ -702,7 +732,7 @@ class BlockchainGUIEnhanced(QMainWindow):
             total_balance += balance
 
             self.balance_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.balance_table.setItem(i, 1, QTableWidgetItem(address[:20] + "..."))
+            self.balance_table.setItem(i, 1, QTableWidgetItem(address if len(address) <= 20 else address[:20] + "..."))
             
             balance_item = QTableWidgetItem(f"{balance:.8f}")
             balance_item.setTextAlignment(Qt.AlignRight)
@@ -782,7 +812,7 @@ class BlockchainGUIEnhanced(QMainWindow):
         """更新系统信息"""
         text = f"BuptCoin 系统信息\n{'=' * 60}\n"
         text += f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        text += f"系统版本: 3.1 (增强版)\n"
+        text += f"系统版本: 3.2 (增强版-已修复)\n"
         text += f"用户: {self.current_user['username']}\n"
         text += f"区块数: {len(self.blockchain.chain)}\n"
         text += f"待处理交易: {len(self.blockchain.pending_transactions)}\n"
@@ -870,7 +900,7 @@ class BlockchainGUIEnhanced(QMainWindow):
         """显示关于对话框"""
         about_text = """
         <h2>BuptCoin 增强版</h2>
-        <p><b>版本:</b> 3.1</p>
+        <p><b>版本:</b> 3.2 (已修复)</p>
         <p><b>功能:</b></p>
         <ul>
             <li>完整的区块链实现</li>
@@ -879,14 +909,20 @@ class BlockchainGUIEnhanced(QMainWindow):
             <li>增强的可视化界面</li>
             <li>多种交易类型支持</li>
         </ul>
+        <p><b>修复内容:</b></p>
+        <ul>
+            <li>✅ 接收方改为下拉选择框</li>
+            <li>✅ 去除重复的genesis地址</li>
+            <li>✅ 挖矿后保持矿工选择</li>
+        </ul>
         """
         self.show_info("关于", about_text)
 
     def setup_timers(self):
         """设置定时器"""
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_display)
-        self.timer.start(3000)
+        self.timer.timeout.connect(lambda: self.update_display(restore_miner_selection=False))
+        self.timer.start(5000)  # 每5秒自动刷新
 
     # 辅助消息框方法
     def show_info(self, title: str, message: str):
@@ -917,7 +953,7 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei", 10))
     app.setApplicationName("BuptCoin Enhanced")
-    app.setApplicationVersion("3.1")
+    app.setApplicationVersion("3.2")
 
     try:
         gui = BlockchainGUIEnhanced()
