@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QLineEdit, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
     QTextEdit, QTableWidget, QTableWidgetItem, QDialog, QMessageBox, QTabWidget,
-    QFrame, QInputDialog, QProgressBar, QCheckBox
+    QFrame, QInputDialog, QProgressBar, QCheckBox, QScrollArea
 )
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
 from PyQt5.QtGui import QFont, QColor, QIcon, QBrush, QPalette
@@ -31,7 +31,7 @@ except ImportError:
 
 
 class UserAuthDialog(QDialog):
-    """用户认证对话框 - 修复输入框显示问题"""
+    """用户认证对话框 - 优化尺寸和布局"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,7 +41,8 @@ class UserAuthDialog(QDialog):
     
     def init_ui(self):
         self.setWindowTitle("BuptCoin 用户认证")
-        self.setFixedSize(520, 500)
+        # 【修复】增大窗口尺寸
+        self.setFixedSize(600, 620)
         self.setStyleSheet("""
             QDialog {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -49,64 +50,71 @@ class UserAuthDialog(QDialog):
             }
             QLabel#title_label { 
                 color: white; 
-                font-size: 32px; 
+                font-size: 36px; 
                 font-weight: bold; 
-                margin-bottom: 10px;
+                margin-bottom: 15px;
             }
             QLabel#subtitle_label { 
-                color: rgba(255,255,255,0.8); 
-                font-size: 14px; 
-                margin-bottom: 20px;
+                color: rgba(255,255,255,0.9); 
+                font-size: 15px; 
+                margin-bottom: 25px;
             }
             QLabel { 
                 color: white; 
-                font-size: 13px;
+                font-size: 14px;
+                font-weight: 500;
             }
             QLineEdit {
-                padding: 12px;
+                padding: 14px;
                 border: 2px solid white;
-                border-radius: 6px;
+                border-radius: 8px;
                 background-color: white;
                 color: #333;
-                font-size: 13px;
+                font-size: 14px;
                 selection-background-color: #3a7bd5;
             }
             QLineEdit:focus {
-                border: 2px solid #3a7bd5;
+                border: 3px solid #3a7bd5;
             }
             QPushButton {
-                padding: 12px;
+                padding: 14px;
                 border: none;
-                border-radius: 6px;
+                border-radius: 8px;
                 font-weight: bold;
-                font-size: 14px;
+                font-size: 15px;
+                min-height: 45px;
+            }
+            QPushButton:hover {
+                transform: scale(1.02);
             }
             QCheckBox { 
                 color: white; 
-                font-size: 12px;
+                font-size: 13px;
             }
             QTabWidget::pane { 
                 border: 2px solid rgba(255,255,255,0.3); 
-                border-radius: 8px; 
+                border-radius: 10px; 
                 background: rgba(255,255,255,0.1);
+                padding: 10px;
             }
             QTabBar::tab { 
                 background: rgba(255,255,255,0.2); 
                 color: white; 
-                padding: 10px 20px; 
+                padding: 12px 25px;
                 margin-right: 5px;
-                border-top-left-radius: 6px; 
-                border-top-right-radius: 6px;
+                border-top-left-radius: 8px; 
+                border-top-right-radius: 8px;
+                font-size: 14px;
             }
             QTabBar::tab:selected { 
-                background: rgba(255,255,255,0.3); 
+                background: rgba(255,255,255,0.35); 
                 font-weight: bold;
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(40, 30, 40, 30)
+        layout.setSpacing(20)
+        layout.setContentsMargins(45, 35, 45, 35)
         
         title = QLabel("💰 BuptCoin")
         title.setObjectName("title_label")
@@ -121,15 +129,16 @@ class UserAuthDialog(QDialog):
         if DATABASE_AVAILABLE and db and hasattr(db, 'is_connected') and db.is_connected:
             self.database_connected = True
             db_status = QLabel("✅ 数据库已连接")
-            db_status.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 12px;")
+            db_status.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 13px;")
         else:
             db_status = QLabel("⚠️ 内存模式（数据不保存）")
-            db_status.setStyleSheet("color: #fbbf24; font-weight: bold; font-size: 12px;")
+            db_status.setStyleSheet("color: #fbbf24; font-weight: bold; font-size: 13px;")
         
         db_status.setAlignment(Qt.AlignCenter)
         layout.addWidget(db_status)
         
         self.tab_widget = QTabWidget()
+        self.tab_widget.setMinimumHeight(360)  # 【修复】增加标签页高度
         
         login_widget = self.create_login_tab()
         self.tab_widget.addTab(login_widget, "🔐 登录")
@@ -141,38 +150,48 @@ class UserAuthDialog(QDialog):
         layout.addWidget(self.tab_widget)
         
         guest_btn = QPushButton("👤 以访客身份继续")
-        guest_btn.setStyleSheet("background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.5);")
+        guest_btn.setStyleSheet("""
+            background: rgba(255,255,255,0.25); 
+            color: white; 
+            border: 2px solid rgba(255,255,255,0.6);
+            min-height: 50px;
+        """)
         guest_btn.clicked.connect(self.guest_login)
         layout.addWidget(guest_btn)
     
     def create_login_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        layout.setContentsMargins(25, 25, 25, 25)
         
         username_label = QLabel("用户名:")
         layout.addWidget(username_label)
         self.login_username = QLineEdit()
         self.login_username.setPlaceholderText("请输入用户名")
-        self.login_username.setMinimumHeight(40)
+        self.login_username.setMinimumHeight(45)
         layout.addWidget(self.login_username)
+        
+        layout.addSpacing(10)
         
         password_label = QLabel("密码:")
         layout.addWidget(password_label)
         self.login_password = QLineEdit()
         self.login_password.setPlaceholderText("请输入密码")
         self.login_password.setEchoMode(QLineEdit.Password)
-        self.login_password.setMinimumHeight(40)
+        self.login_password.setMinimumHeight(45)
         self.login_password.returnPressed.connect(self.do_login)
         layout.addWidget(self.login_password)
         
+        layout.addSpacing(10)
+        
         self.remember_checkbox = QCheckBox("记住我")
         layout.addWidget(self.remember_checkbox)
+        
         layout.addStretch()
         
         login_btn = QPushButton("🚀 登录")
-        login_btn.setStyleSheet("background: #10b981; color: white; font-size: 15px;")
+        login_btn.setStyleSheet("background: #10b981; color: white; font-size: 16px;")
         login_btn.clicked.connect(self.do_login)
         layout.addWidget(login_btn)
         
@@ -180,15 +199,22 @@ class UserAuthDialog(QDialog):
     
     def create_register_tab(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 15, 20, 15)
+        
+        # 【修复】使用滚动区域防止内容溢出
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(12)
+        layout.setContentsMargins(25, 20, 25, 20)
         
         username_label = QLabel("用户名:")
         layout.addWidget(username_label)
         self.register_username = QLineEdit()
         self.register_username.setPlaceholderText("6-20个字符")
-        self.register_username.setMinimumHeight(35)
+        self.register_username.setMinimumHeight(40)
         layout.addWidget(self.register_username)
         
         password_label = QLabel("密码:")
@@ -196,7 +222,7 @@ class UserAuthDialog(QDialog):
         self.register_password = QLineEdit()
         self.register_password.setPlaceholderText("至少6位")
         self.register_password.setEchoMode(QLineEdit.Password)
-        self.register_password.setMinimumHeight(35)
+        self.register_password.setMinimumHeight(40)
         layout.addWidget(self.register_password)
         
         confirm_label = QLabel("确认密码:")
@@ -204,22 +230,28 @@ class UserAuthDialog(QDialog):
         self.register_confirm = QLineEdit()
         self.register_confirm.setPlaceholderText("再次输入密码")
         self.register_confirm.setEchoMode(QLineEdit.Password)
-        self.register_confirm.setMinimumHeight(35)
+        self.register_confirm.setMinimumHeight(40)
         layout.addWidget(self.register_confirm)
         
         email_label = QLabel("邮箱 (可选):")
         layout.addWidget(email_label)
         self.register_email = QLineEdit()
         self.register_email.setPlaceholderText("example@email.com")
-        self.register_email.setMinimumHeight(35)
+        self.register_email.setMinimumHeight(40)
         layout.addWidget(self.register_email)
         
         layout.addStretch()
         
         register_btn = QPushButton("📝 注册")
-        register_btn.setStyleSheet("background: #3b82f6; color: white; font-size: 15px;")
+        register_btn.setStyleSheet("background: #3b82f6; color: white; font-size: 16px;")
         register_btn.clicked.connect(self.do_register)
         layout.addWidget(register_btn)
+        
+        scroll.setWidget(content)
+        
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(scroll)
         
         return widget
     
@@ -381,7 +413,7 @@ class BlockchainGUIEnhanced(QMainWindow):
         """)
 
     def init_ui(self):
-        self.setWindowTitle('💰 BuptCoin - 完整功能版 v4.3')
+        self.setWindowTitle('💰 BuptCoin - 完整功能版 v4.4')
         self.setGeometry(50, 50, 1500, 950)
         
         central = QWidget()
@@ -556,6 +588,12 @@ class BlockchainGUIEnhanced(QMainWindow):
         total_unit.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
         total_layout.addWidget(total_unit)
         
+        # 【新增】同步数据库按钮
+        sync_btn = QPushButton("🔄 同步数据库余额")
+        sync_btn.setStyleSheet("background: white; color: #667eea; font-weight: bold; padding: 10px 20px; border-radius: 6px;")
+        sync_btn.clicked.connect(self.sync_balances_to_database)
+        total_layout.addWidget(sync_btn)
+        
         group_layout.addWidget(total_frame)
         group.setLayout(group_layout)
         layout.addWidget(group)
@@ -706,13 +744,15 @@ class BlockchainGUIEnhanced(QMainWindow):
         menubar = self.menuBar()
         
         file_menu = menubar.addMenu('📁 文件')
-        file_menu.addAction('🆕 新建钱包地址', self.create_wallet_address)  # 修改名称
+        file_menu.addAction('🆕 新建钱包地址', self.create_wallet_address)
         file_menu.addSeparator()
         file_menu.addAction('❌ 退出', self.close)
         
         tool_menu = menubar.addMenu('🛠️ 工具')
         tool_menu.addAction('🧪 测试交易', self.test_transaction)
         tool_menu.addAction('🔄 刷新所有', self.update_all_displays)
+        if self.database_connected:
+            tool_menu.addAction('💾 同步余额到数据库', self.sync_balances_to_database)
         
         help_menu = menubar.addMenu('❓ 帮助')
         help_menu.addAction('ℹ️ 关于', self.show_about)
@@ -773,6 +813,35 @@ class BlockchainGUIEnhanced(QMainWindow):
             QMessageBox.information(self, "验证结果", "✅ 区块链验证通过！")
         else:
             QMessageBox.critical(self, "验证结果", "❌ 区块链验证失败！")
+
+    def sync_balances_to_database(self):
+        """【新增】同步所有地址余额到数据库"""
+        if not self.database_connected:
+            QMessageBox.warning(self, "警告", "数据库未连接")
+            return
+        
+        try:
+            addresses = list(set(['genesis'] + self.wallet.addresses))
+            synced_count = 0
+            
+            for address in addresses:
+                # 从区块链获取实际余额
+                balance = self.blockchain.get_balance(address)
+                
+                # 同步到数据库（使用set模式直接设置）
+                if self.db.update_address_balance(address, balance, 'set'):
+                    synced_count += 1
+            
+            QMessageBox.information(self, "同步完成", 
+                f"✅ 成功同步 {synced_count}/{len(addresses)} 个地址余额到数据库！")
+            
+            # 刷新显示
+            self.update_all_displays()
+            if hasattr(self, 'db_stats_text'):
+                self.update_database_info()
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"同步失败: {str(e)}")
 
     def update_stake_ranking(self):
         """新增: 更新质押排名"""
@@ -972,7 +1041,7 @@ class BlockchainGUIEnhanced(QMainWindow):
                 self.tx_table.setItem(i, 6, QTableWidgetItem(tx['data'][:20] if tx['data'] else "-"))
             
             sys_text = f"BuptCoin 系统信息\n{'='*50}\n"
-            sys_text += f"版本: 4.3 完整功能版 (已修复)\n"
+            sys_text += f"版本: 4.4 完整功能版 (已修复)\n"
             sys_text += f"用户: {self.current_user['username']}\n"
             sys_text += f"用户ID: {self.current_user['id']}\n"
             sys_text += f"数据库: {'已连接' if self.database_connected else '未连接'}\n"
@@ -1005,35 +1074,25 @@ class BlockchainGUIEnhanced(QMainWindow):
         """修复: 创建新地址（不删除旧地址）+ 保存到数据库"""
         nickname, ok = QInputDialog.getText(self, "新建地址", "请输入地址昵称（可选）:")
         
-        if ok:  # 用户点击了确定（即使输入为空也继续）
+        if ok:
             try:
-                # 生成新地址
                 new_address = self.generate_new_address()
-                
-                # 添加到钱包（不替换整个钱包对象）
                 self.wallet.addresses.append(new_address)
                 
-                # 如果有数据库连接，保存到数据库
                 saved_to_db = False
                 if self.database_connected and self.current_user['id'] > 0:
                     try:
                         addr_nickname = nickname.strip() if nickname.strip() else f"地址{len(self.wallet.addresses)}"
-                        addr_id = self.db.create_wallet_address(self.current_user['id'], addr_nickname)
-                        if addr_id:
-                            # 更新地址为数据库中的地址
-                            saved_addr = self.db.get_wallet_address(addr_id)
-                            if saved_addr:
-                                # 替换最后添加的地址为数据库地址
-                                self.wallet.addresses[-1] = saved_addr['address']
-                                new_address = saved_addr['address']
-                                saved_to_db = True
+                        result = self.db.create_wallet_address(self.current_user['id'], addr_nickname)
+                        if result and 'address' in result:
+                            self.wallet.addresses[-1] = result['address']
+                            new_address = result['address']
+                            saved_to_db = True
                     except Exception as e:
                         print(f"保存到数据库失败: {e}")
                 
-                # 更新界面
                 self.update_all_displays()
                 
-                # 显示详细信息
                 info_msg = f"✅ 新地址创建成功！\n\n"
                 info_msg += f"🔑 地址:\n{new_address}\n\n"
                 if nickname.strip():
@@ -1047,7 +1106,6 @@ class BlockchainGUIEnhanced(QMainWindow):
                 
                 QMessageBox.information(self, "成功", info_msg)
                 
-                # 控制台日志
                 print(f"\n✅ 新地址创建成功！")
                 print(f"🔑 地址: {new_address}")
                 if nickname.strip():
@@ -1077,7 +1135,7 @@ class BlockchainGUIEnhanced(QMainWindow):
     def show_about(self):
         text = """
         <h2>💰 BuptCoin 完整功能版</h2>
-        <p><b>版本:</b> 4.3 (已修复)</p>
+        <p><b>版本:</b> 4.4 (已修复)</p>
         <p><b>功能特性:</b></p>
         <ul>
             <li>✅ 用户登录注册系统</li>
@@ -1091,10 +1149,10 @@ class BlockchainGUIEnhanced(QMainWindow):
         </ul>
         <p><b>修复内容:</b></p>
         <ul>
-            <li>✅ 修复登录界面输入框显示问题</li>
-            <li>✅ 修复交易类型显示错误</li>
-            <li>✅ 修复创建地址删除旧地址问题</li>
-            <li>✅ 新增数据库保存地址功能</li>
+            <li>✅ 修复登录界面尺寸和布局</li>
+            <li>✅ 修复数据库余额同步问题</li>
+            <li>✅ 新增余额同步按钮</li>
+            <li>✅ 优化用户体验</li>
         </ul>
         <p><b>开发:</b> 北邮区块链项目组</p>
         """
@@ -1124,7 +1182,7 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei", 10))
     app.setApplicationName("BuptCoin Enhanced")
-    app.setApplicationVersion("4.3")
+    app.setApplicationVersion("4.4")
     
     try:
         gui = BlockchainGUIEnhanced()
