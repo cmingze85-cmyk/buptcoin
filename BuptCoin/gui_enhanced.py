@@ -2,6 +2,7 @@
 import sys
 import threading
 import time
+import hashlib
 from datetime import datetime
 from typing import Optional, List, Dict
 from PyQt5.QtWidgets import (
@@ -380,7 +381,7 @@ class BlockchainGUIEnhanced(QMainWindow):
         """)
 
     def init_ui(self):
-        self.setWindowTitle('💰 BuptCoin - 完整功能版 v4.2')
+        self.setWindowTitle('💰 BuptCoin - 完整功能版 v4.3')
         self.setGeometry(50, 50, 1500, 950)
         
         central = QWidget()
@@ -500,7 +501,6 @@ class BlockchainGUIEnhanced(QMainWindow):
         group.setLayout(grid)
         layout.addWidget(group)
         
-        # 挖矿
         mine_group = QGroupBox("⛏️ 挖矿")
         mine_layout = QHBoxLayout()
         mine_layout.addWidget(QLabel("矿工:"))
@@ -515,7 +515,6 @@ class BlockchainGUIEnhanced(QMainWindow):
         mine_group.setLayout(mine_layout)
         layout.addWidget(mine_group)
         
-        # 交易历史
         history_group = QGroupBox("📊 最近交易")
         history_layout = QVBoxLayout()
         self.tx_table = QTableWidget()
@@ -707,7 +706,7 @@ class BlockchainGUIEnhanced(QMainWindow):
         menubar = self.menuBar()
         
         file_menu = menubar.addMenu('📁 文件')
-        file_menu.addAction('🆕 新建钱包', self.create_wallet)
+        file_menu.addAction('🆕 新建钱包地址', self.create_wallet_address)  # 修改名称
         file_menu.addSeparator()
         file_menu.addAction('❌ 退出', self.close)
         
@@ -888,16 +887,13 @@ class BlockchainGUIEnhanced(QMainWindow):
     def update_all_displays(self):
         """更新所有显示"""
         try:
-            # 保存当前选择
             sender = self.sender_combo.currentText()
             receiver = self.receiver_combo.currentText()
             miner = self.miner_combo.currentText()
             
-            # 更新地址列表
             addresses = list(set(['genesis'] + self.wallet.addresses))
             addresses.sort()
             
-            # 阻塞信号
             self.sender_combo.blockSignals(True)
             self.receiver_combo.blockSignals(True)
             self.miner_combo.blockSignals(True)
@@ -911,7 +907,6 @@ class BlockchainGUIEnhanced(QMainWindow):
                 self.receiver_combo.addItem(addr)
                 self.miner_combo.addItem(addr)
             
-            # 恢复选择
             if sender:
                 idx = self.sender_combo.findText(sender)
                 if idx >= 0: self.sender_combo.setCurrentIndex(idx)
@@ -927,7 +922,6 @@ class BlockchainGUIEnhanced(QMainWindow):
             self.receiver_combo.blockSignals(False)
             self.miner_combo.blockSignals(False)
             
-            # 更新余额
             total = 0
             self.balance_table.setRowCount(len(addresses))
             for i, addr in enumerate(addresses):
@@ -945,7 +939,6 @@ class BlockchainGUIEnhanced(QMainWindow):
             self.pending_label['value'].setText(str(len(self.blockchain.pending_transactions)))
             self.total_balance.setText(f"{total:.2f}")
             
-            # 更新区块链
             text = f"📊 区块链状态\n{'='*50}\n"
             text += f"区块总数: {len(self.blockchain.chain)}\n"
             text += f"待处理交易: {len(self.blockchain.pending_transactions)}\n"
@@ -955,7 +948,6 @@ class BlockchainGUIEnhanced(QMainWindow):
                 text += f"区块 #{block.index}\n  哈希: {block.hash[:20]}...\n  交易: {len(block.transactions)}\n\n"
             self.blockchain_text.setText(text)
             
-            # 更新交易表
             txs = []
             for block in self.blockchain.chain:
                 for tx in block.transactions:
@@ -979,9 +971,8 @@ class BlockchainGUIEnhanced(QMainWindow):
                 self.tx_table.setItem(i, 5, QTableWidgetItem(tx['status']))
                 self.tx_table.setItem(i, 6, QTableWidgetItem(tx['data'][:20] if tx['data'] else "-"))
             
-            # 更新系统信息
             sys_text = f"BuptCoin 系统信息\n{'='*50}\n"
-            sys_text += f"版本: 4.2 完整功能版 (已修复)\n"
+            sys_text += f"版本: 4.3 完整功能版 (已修复)\n"
             sys_text += f"用户: {self.current_user['username']}\n"
             sys_text += f"用户ID: {self.current_user['id']}\n"
             sys_text += f"数据库: {'已连接' if self.database_connected else '未连接'}\n"
@@ -991,7 +982,6 @@ class BlockchainGUIEnhanced(QMainWindow):
             sys_text += f"钱包地址数: {len(self.wallet.addresses)}\n"
             self.system_text.setText(sys_text)
             
-            # 更新质押和投票
             self.update_stake_ranking()
             self.update_vote_results()
             if self.database_connected:
@@ -1003,37 +993,72 @@ class BlockchainGUIEnhanced(QMainWindow):
         """Alias for update_all_displays"""
         self.update_all_displays()
 
-    def create_wallet(self):
-        """修复: 创建钱包并生成新地址"""
-        name, ok = QInputDialog.getText(self, "新建钱包", "请输入钱包名称:")
-        if ok and name:
+    def generate_new_address(self) -> str:
+        """生成新地址（使用哈希算法）"""
+        import random
+        timestamp = str(time.time())
+        random_str = str(random.randint(100000, 999999))
+        hash_str = hashlib.sha256(f"{timestamp}{random_str}".encode()).hexdigest()
+        return f"0x{hash_str[:40]}"
+
+    def create_wallet_address(self):
+        """修复: 创建新地址（不删除旧地址）+ 保存到数据库"""
+        nickname, ok = QInputDialog.getText(self, "新建地址", "请输入地址昵称（可选）:")
+        
+        if ok:  # 用户点击了确定（即使输入为空也继续）
             try:
-                # 创建新钱包
-                old_addr_count = len(self.wallet.addresses)
-                self.wallet = Wallet(name)
-                new_addr_count = len(self.wallet.addresses)
+                # 生成新地址
+                new_address = self.generate_new_address()
+                
+                # 添加到钱包（不替换整个钱包对象）
+                self.wallet.addresses.append(new_address)
+                
+                # 如果有数据库连接，保存到数据库
+                saved_to_db = False
+                if self.database_connected and self.current_user['id'] > 0:
+                    try:
+                        addr_nickname = nickname.strip() if nickname.strip() else f"地址{len(self.wallet.addresses)}"
+                        addr_id = self.db.create_wallet_address(self.current_user['id'], addr_nickname)
+                        if addr_id:
+                            # 更新地址为数据库中的地址
+                            saved_addr = self.db.get_wallet_address(addr_id)
+                            if saved_addr:
+                                # 替换最后添加的地址为数据库地址
+                                self.wallet.addresses[-1] = saved_addr['address']
+                                new_address = saved_addr['address']
+                                saved_to_db = True
+                    except Exception as e:
+                        print(f"保存到数据库失败: {e}")
                 
                 # 更新界面
                 self.update_all_displays()
                 
                 # 显示详细信息
-                info_msg = f"✅ 钱包创建成功！\n\n"
-                info_msg += f"💼 钱包名称: {name}\n"
-                info_msg += f"🎲 生成地址数: {new_addr_count}\n"
-                info_msg += f"📦 新增地址: {new_addr_count - old_addr_count}\n\n"
-                info_msg += f"🔑 首个地址:\n{self.wallet.addresses[0][:40]}...\n\n"
-                info_msg += f"ℹ️ 请在 '余额' 标签页查看所有地址"
+                info_msg = f"✅ 新地址创建成功！\n\n"
+                info_msg += f"🔑 地址:\n{new_address}\n\n"
+                if nickname.strip():
+                    info_msg += f"📝 昵称: {nickname}\n\n"
+                info_msg += f"📦 当前总地址数: {len(self.wallet.addresses)}\n"
+                
+                if saved_to_db:
+                    info_msg += f"\n💾 已保存到数据库"
+                else:
+                    info_msg += f"\n⚠️ 仅保存在内存中（未保存到数据库）"
                 
                 QMessageBox.information(self, "成功", info_msg)
                 
-                # 记录日志
-                print(f"\n✅ 钱包 '{name}' 创建成功！")
-                print(f"📦 生成 {new_addr_count} 个地址")
-                print(f"🔑 首个地址: {self.wallet.addresses[0]}")
+                # 控制台日志
+                print(f"\n✅ 新地址创建成功！")
+                print(f"🔑 地址: {new_address}")
+                if nickname.strip():
+                    print(f"📝 昵称: {nickname}")
+                print(f"📦 当前总地址数: {len(self.wallet.addresses)}")
+                if saved_to_db:
+                    print(f"💾 已保存到数据库")
                 
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"创建钱包失败:\n{str(e)}")
-                print(f"❌ 创建钱包失败: {e}")
+                QMessageBox.critical(self, "错误", f"创建地址失败:\n{str(e)}")
+                print(f"❌ 创建地址失败: {e}")
 
     def test_transaction(self):
         if len(self.wallet.addresses) < 2:
@@ -1052,7 +1077,7 @@ class BlockchainGUIEnhanced(QMainWindow):
     def show_about(self):
         text = """
         <h2>💰 BuptCoin 完整功能版</h2>
-        <p><b>版本:</b> 4.2 (已修复)</p>
+        <p><b>版本:</b> 4.3 (已修复)</p>
         <p><b>功能特性:</b></p>
         <ul>
             <li>✅ 用户登录注册系统</li>
@@ -1068,7 +1093,8 @@ class BlockchainGUIEnhanced(QMainWindow):
         <ul>
             <li>✅ 修复登录界面输入框显示问题</li>
             <li>✅ 修复交易类型显示错误</li>
-            <li>✅ 修复创建钱包无反馈问题</li>
+            <li>✅ 修复创建地址删除旧地址问题</li>
+            <li>✅ 新增数据库保存地址功能</li>
         </ul>
         <p><b>开发:</b> 北邮区块链项目组</p>
         """
@@ -1098,7 +1124,7 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei", 10))
     app.setApplicationName("BuptCoin Enhanced")
-    app.setApplicationVersion("4.2")
+    app.setApplicationVersion("4.3")
     
     try:
         gui = BlockchainGUIEnhanced()
