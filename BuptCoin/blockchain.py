@@ -76,7 +76,6 @@ class Block:
         self.previous_hash = previous_hash
         self.nonce = nonce
         self.merkle_tree = MerkleTree(transactions)
-        # 🔥 注意：这里会调用calculate_hash()，它依赖于transactions的状态
         self.hash = self.calculate_hash()
 
     def calculate_hash(self) -> str:
@@ -208,7 +207,6 @@ class Blockchain:
                 cursor.close()
 
                 if transactions_data:
-                    # 🔥 关键修复：先创建Transaction对象，再设置transaction_id
                     transactions = []
                     for tx_data in transactions_data:
                         tx = Transaction(
@@ -217,9 +215,9 @@ class Blockchain:
                             amount=float(tx_data['amount']),
                             transaction_type=tx_data['transaction_type'],
                             data=tx_data.get('data', ''),
-                            timestamp=tx_data['timestamp']  # 使用数据库中的时间戳
+                            timestamp=tx_data['timestamp']
                         )
-                        # 🔥 不要让Transaction自己计算transaction_id，使用数据库中的
+                        # 🔥 用数据库中的transaction_hash覆盖
                         tx.transaction_id = tx_data['transaction_hash']
                         tx.block_number = tx_data['block_number']
                         tx.status = tx_data['status']
@@ -231,7 +229,6 @@ class Blockchain:
                     cursor.close()
 
                     if block_data:
-                        # 🔥 先创建Block对象（它会计算哈希），然后用数据库中的哈希覆盖
                         block = Block(
                             index=block_data['block_number'],
                             transactions=transactions,
@@ -239,7 +236,7 @@ class Blockchain:
                             timestamp=block_data['timestamp'],
                             nonce=block_data['nonce']
                         )
-                        # 🔥 关键：用数据库中存储的哈希覆盖刚刚计算的哈希
+                        # 🔥 用数据库中的block_hash覆盖
                         block.hash = block_data['block_hash']
                         blocks_dict[block_num] = block
                         print(f"  加载区块 #{block_num}: {block.hash[:20]}...")
@@ -424,6 +421,11 @@ class Blockchain:
         all_transactions.append(reward_transaction)
 
         print(f"打包交易总数: {len(all_transactions)}")
+        
+        # 🔥 关键修复：打印所有交易的transaction_id，用于调试
+        print("\n交易列表：")
+        for i, tx in enumerate(all_transactions):
+            print(f"  [{i}] {tx.sender} -> {tx.receiver}: {tx.amount}, TxID: {tx.transaction_id[:20]}...")
 
         new_block = Block(
             index=len(self.chain),
@@ -431,19 +433,23 @@ class Blockchain:
             previous_hash=self.get_latest_block().hash
         )
 
-        print(f"开始计算工作量证明...")
+        print(f"\n开始计算工作量证明...")
         start_time = time.time()
         new_block.mine_block(self.difficulty)
         mining_time = time.time() - start_time
         print(f"挖矿耗时: {mining_time:.2f}秒")
+        
+        # 🔥 关键修复：挖矿后再次打印哈希，确认没有变化
+        print(f"挖矿后区块哈希: {new_block.hash}")
 
         self.chain.append(new_block)
 
         if self.db and self.db.is_connected:
             try:
+                # 🔥 关键：保存区块时使用new_block.hash（已挖矿的哈希）
                 block_data = {
                     'number': new_block.index,
-                    'hash': new_block.hash,
+                    'hash': new_block.hash,  # 🔥 这个哈希是挖矿后的
                     'previous_hash': new_block.previous_hash,
                     'timestamp': new_block.timestamp,
                     'difficulty': self.difficulty,
@@ -454,6 +460,9 @@ class Blockchain:
                     'block_size': len(json.dumps([tx.to_dict() for tx in all_transactions]))
                 }
 
+                print(f"\n保存区块到数据库...")
+                print(f"  区块哈希: {block_data['hash']}")
+                
                 block_success = self.db.record_block(block_data)
 
                 if block_success:
@@ -465,8 +474,9 @@ class Blockchain:
 
                         cursor = self.db.connection.cursor()
                         if tx.sender == "0":
+                            # 🔥 关键修复：保存系统奖励交易时，使用tx.transaction_id
                             tx_data = {
-                                'hash': tx.transaction_id,
+                                'hash': tx.transaction_id,  # 🔥 使用已计算的transaction_id
                                 'from': tx.sender,
                                 'to': tx.receiver,
                                 'amount': float(tx.amount),
@@ -479,6 +489,7 @@ class Blockchain:
                                 'block_number': new_block.index,
                                 'memo': 'Mining reward'
                             }
+                            print(f"  保存奖励交易: {tx.transaction_id[:20]}...")
                             self.db.record_transaction(tx_data)
                         else:
                             cursor.execute('''
@@ -603,6 +614,11 @@ class Blockchain:
             previous_block = self.chain[i - 1]
 
             print(f"\n检查区块 #{current_block.index}...")
+            
+            # 🔥 调试信息：打印区块的交易transaction_id
+            print(f"  区块 #{current_block.index} 包含 {len(current_block.transactions)} 笔交易：")
+            for j, tx in enumerate(current_block.transactions):
+                print(f"    [{j}] TxID: {tx.transaction_id[:20]}...")
 
             if current_block.index != previous_block.index + 1:
                 print(f"❌ 错误：区块索引不连续")
