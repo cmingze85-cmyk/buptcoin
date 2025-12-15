@@ -23,12 +23,13 @@ class Transaction:
         self.amount = amount
         self.transaction_type = transaction_type
         self.data = data
-        # 🔥 修复：允许传入固定的时间戳（用于创世区块）
+        # 🔥 关键修复：先设置时间戳，再计算哈希
         self.timestamp = timestamp if timestamp is not None else Utils.get_current_timestamp()
-        self.transaction_id = self.calculate_hash()
         self.signature = signature
-        self.block_number = None  # 新增：记录所在区块
-        self.status = "pending"  # 新增：交易状态
+        self.block_number = None
+        self.status = "pending"
+        # 🔥 在所有属性设置完成后才计算哈希
+        self.transaction_id = self.calculate_hash()
 
     def calculate_hash(self) -> str:
         transaction_data = {
@@ -75,6 +76,7 @@ class Block:
         self.previous_hash = previous_hash
         self.nonce = nonce
         self.merkle_tree = MerkleTree(transactions)
+        # 🔥 注意：这里会调用calculate_hash()，它依赖于transactions的状态
         self.hash = self.calculate_hash()
 
     def calculate_hash(self) -> str:
@@ -90,12 +92,6 @@ class Block:
         return Utils.calculate_hash(block_data)
 
     def mine_block(self, difficulty: int) -> None:
-        """
-        挖矿：通过不断尝试nonce值，找到满足难度要求的哈希值
-        
-        Args:
-            difficulty: 挖矿难度（哈希前缀零的个数）
-        """
         target = '0' * difficulty
         print(f"开始挖矿，难度: {difficulty}, 目标前缀: {target}")
         
@@ -107,7 +103,6 @@ class Block:
             self.hash = self.calculate_hash()
             attempts += 1
             
-            # 每1000次尝试显示一次进度
             if attempts % 1000 == 0:
                 elapsed = time.time() - start_time
                 rate = attempts / elapsed if elapsed > 0 else 0
@@ -123,7 +118,6 @@ class Block:
         print(f"  平均算力: {rate:.0f} H/s")
 
     def to_dict(self) -> Dict:
-        """将区块对象转换为字典（包含数据库存储的所有字段）"""
         return {
             'index': self.index,
             'timestamp': self.timestamp,
@@ -151,7 +145,6 @@ class Blockchain:
         self.contract_manager = ContractManager()
         self.forks = []
 
-        # 数据库连接
         self.db = None
         if DATABASE_AVAILABLE:
             self.db = db
@@ -159,10 +152,8 @@ class Blockchain:
         else:
             print("⚠️  使用内存存储，数据不会持久化")
 
-        # 🔥 终极修复：先尝试从数据库加载
         loaded = self.load_from_database()
         
-        # 检查加载的数据是否有效
         if loaded and self.chain:
             if self.chain[0].index != 0:
                 print(f"\n🚨 致命错误：数据库已损坏！")
@@ -172,7 +163,6 @@ class Blockchain:
                 self.pending_transactions = []
                 loaded = False
         
-        # 只有当数据库中没有有效区块时，才创建创世区块
         if not loaded:
             print("数据库中没有有效区块，创建创世区块")
             self.create_genesis_block()
@@ -180,12 +170,6 @@ class Blockchain:
             print(f"✅ 从数据库成功加载区块链，跳过创世区块创建")
 
     def load_from_database(self) -> bool:
-        """
-        从数据库加载区块链和待处理交易
-        
-        Returns:
-            bool: 是否成功加载了区块
-        """
         if not self.db or not self.db.is_connected:
             print("数据库未连接，跳过数据加载")
             return False
@@ -193,7 +177,6 @@ class Blockchain:
         try:
             print("正在从数据库加载数据...")
 
-            # 1. 获取所有区块号
             cursor = self.db.connection.cursor(dictionary=True)
             cursor.execute('''
             SELECT DISTINCT block_number FROM transactions 
@@ -209,12 +192,10 @@ class Blockchain:
 
             print(f"数据库中找到区块: {block_numbers}")
 
-            # 🔥 关键检查：必须从0开始
             if block_numbers[0] != 0:
                 print(f"⚠️ 警告：数据库中第一个区块不是0，而是 {block_numbers[0]}！数据库可能损坏！")
                 return False
 
-            # 2. 按区块加载交易
             blocks_dict = {}
             for block_num in block_numbers:
                 cursor = self.db.connection.cursor(dictionary=True)
@@ -227,7 +208,7 @@ class Blockchain:
                 cursor.close()
 
                 if transactions_data:
-                    # 创建交易对象 - 🔥 使用数据库中的时间戳
+                    # 🔥 关键修复：先创建Transaction对象，再设置transaction_id
                     transactions = []
                     for tx_data in transactions_data:
                         tx = Transaction(
@@ -236,20 +217,21 @@ class Blockchain:
                             amount=float(tx_data['amount']),
                             transaction_type=tx_data['transaction_type'],
                             data=tx_data.get('data', ''),
-                            timestamp=tx_data['timestamp']  # 🔥 关键：使用数据库中的时间戳
+                            timestamp=tx_data['timestamp']  # 使用数据库中的时间戳
                         )
+                        # 🔥 不要让Transaction自己计算transaction_id，使用数据库中的
                         tx.transaction_id = tx_data['transaction_hash']
                         tx.block_number = tx_data['block_number']
                         tx.status = tx_data['status']
                         transactions.append(tx)
 
-                    # 从数据库获取区块信息
                     cursor = self.db.connection.cursor(dictionary=True)
                     cursor.execute('SELECT * FROM blocks WHERE block_number = %s', (block_num,))
                     block_data = cursor.fetchone()
                     cursor.close()
 
                     if block_data:
+                        # 🔥 先创建Block对象（它会计算哈希），然后用数据库中的哈希覆盖
                         block = Block(
                             index=block_data['block_number'],
                             transactions=transactions,
@@ -257,19 +239,17 @@ class Blockchain:
                             timestamp=block_data['timestamp'],
                             nonce=block_data['nonce']
                         )
-                        # 🔥 关键：使用数据库中存储的哈希
+                        # 🔥 关键：用数据库中存储的哈希覆盖刚刚计算的哈希
                         block.hash = block_data['block_hash']
                         blocks_dict[block_num] = block
                         print(f"  加载区块 #{block_num}: {block.hash[:20]}...")
 
-            # 按区块号排序并添加到链
             sorted_blocks = sorted(blocks_dict.items(), key=lambda x: x[0])
             for _, block in sorted_blocks:
                 self.chain.append(block)
 
             print(f"✅ 从数据库加载了 {len(self.chain)} 个区块")
 
-            # 3. 加载待处理交易
             cursor = self.db.connection.cursor(dictionary=True)
             cursor.execute('''
             SELECT * FROM transactions 
@@ -286,7 +266,7 @@ class Blockchain:
                     amount=float(tx_data['amount']),
                     transaction_type=tx_data['transaction_type'],
                     data=tx_data.get('data', ''),
-                    timestamp=tx_data['timestamp']  # 🔥 使用数据库时间戳
+                    timestamp=tx_data['timestamp']
                 )
                 tx.transaction_id = tx_data['transaction_hash']
                 tx.status = tx_data['status']
@@ -295,7 +275,7 @@ class Blockchain:
             if self.pending_transactions:
                 print(f"✅ 从数据库加载了 {len(self.pending_transactions)} 笔待处理交易")
 
-            return True  # 成功加载
+            return True
 
         except Exception as e:
             print(f"❌ 从数据库加载数据失败: {e}")
@@ -304,29 +284,26 @@ class Blockchain:
             return False
 
     def create_genesis_block(self) -> None:
-        """创建创世区块（第一个区块） - 🔥 固定时间戳版本"""
         print("正在创建创世区块...")
 
-        # 🔥 关键修复：创世交易使用固定时间戳
-        GENESIS_TIMESTAMP = 1633046400  # 固定的创世时间戳
+        GENESIS_TIMESTAMP = 1633046400
         
         genesis_transaction = Transaction(
             sender="0",
             receiver="genesis",
             amount=1000.0,
             transaction_type="genesis",
-            timestamp=GENESIS_TIMESTAMP  # 🔥 使用固定时间戳
+            timestamp=GENESIS_TIMESTAMP
         )
 
         genesis_block = Block(
             index=0,
             transactions=[genesis_transaction],
             previous_hash="0" * 64,
-            timestamp=GENESIS_TIMESTAMP,  # 🔥 使用固定时间戳
+            timestamp=GENESIS_TIMESTAMP,
             nonce=0
         )
 
-        # 计算哈希
         genesis_block.hash = genesis_block.calculate_hash()
         self.chain.append(genesis_block)
 
@@ -335,10 +312,8 @@ class Blockchain:
         print(f"   哈希: {genesis_block.hash}")
         print(f"   时间戳: {GENESIS_TIMESTAMP}")
 
-        # 保存创世区块到数据库
         if self.db and self.db.is_connected:
             try:
-                # 保存区块
                 block_data = {
                     'number': genesis_block.index,
                     'hash': genesis_block.hash,
@@ -353,7 +328,6 @@ class Blockchain:
                 }
                 self.db.record_block(block_data)
 
-                # 保存交易
                 tx_data = {
                     'hash': genesis_transaction.transaction_id,
                     'from': genesis_transaction.sender,
@@ -375,7 +349,6 @@ class Blockchain:
                 print(f"⚠️ 保存创世区块到数据库失败 (可能已存在): {e}")
 
     def add_transaction(self, transaction: Transaction, signature: str = None) -> bool:
-        # ... (保持原有代码不变)
         if signature and transaction.sender != "0":
             if not self.verify_transaction_signature(transaction, signature):
                 print(f"❌ 交易签名验证失败！交易ID: {transaction.transaction_id}")
@@ -424,7 +397,6 @@ class Blockchain:
         return True
 
     def mine_pending_transactions(self, miner_address: str) -> bool:
-        # ... (保持原有挖矿代码)
         if not self.pending_transactions:
             print("没有待处理的交易，无需挖矿")
             return False
@@ -652,6 +624,9 @@ class Blockchain:
                 print(f"   存储的哈希: {original_hash[:20]}...")
                 print(f"   计算的哈希: {calculated_hash[:20]}...")
                 print(f"   Nonce: {current_block.nonce}")
+                print(f"\n💡 解决方案：删除数据库重新开始！")
+                print(f"   cd D:\\pyqt5\\BuptCoin")
+                print(f"   del buptcoin.db")
                 return False
 
             if current_block.hash[:self.difficulty] != '0' * self.difficulty:
