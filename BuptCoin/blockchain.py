@@ -17,13 +17,14 @@ except ImportError:
 
 class Transaction:
     def __init__(self, sender: str, receiver: str, amount: float,
-                 transaction_type: str = "transfer", data: str = "",signature: Optional[str] = None):
+                 transaction_type: str = "transfer", data: str = "", signature: Optional[str] = None, timestamp: Optional[int] = None):
         self.sender = sender
         self.receiver = receiver
         self.amount = amount
         self.transaction_type = transaction_type
         self.data = data
-        self.timestamp = Utils.get_current_timestamp()
+        # 🔥 修复：允许传入固定的时间戳（用于创世区块）
+        self.timestamp = timestamp if timestamp is not None else Utils.get_current_timestamp()
         self.transaction_id = self.calculate_hash()
         self.signature = signature
         self.block_number = None  # 新增：记录所在区块
@@ -158,11 +159,12 @@ class Blockchain:
         else:
             print("⚠️  使用内存存储，数据不会持久化")
 
-        # 创建创世区块
-        self.create_genesis_block()
-
-        # 从数据库加载现有数据
+        # 从数据库加载现有数据（包括创世区块）
         self.load_from_database()
+        
+        # 如果数据库中没有区块，创建创世区块
+        if not self.chain:
+            self.create_genesis_block()
 
     def load_from_database(self):
         """从数据库加载区块链和待处理交易"""
@@ -173,7 +175,7 @@ class Blockchain:
         try:
             print("正在从数据库加载数据...")
 
-            # 1. 加载已确认的交易（区块中的交易）
+            # 1. 加载所有区块（包括创世区块）
             cursor = self.db.connection.cursor(dictionary=True)
             cursor.execute('''
             SELECT DISTINCT block_number FROM transactions 
@@ -197,7 +199,7 @@ class Blockchain:
                     cursor.close()
 
                     if transactions_data:
-                        # 创建交易对象
+                        # 创建交易对象 - 🔥 使用数据库中的时间戳
                         transactions = []
                         for tx_data in transactions_data:
                             tx = Transaction(
@@ -205,10 +207,10 @@ class Blockchain:
                                 receiver=tx_data['to_address'],
                                 amount=float(tx_data['amount']),
                                 transaction_type=tx_data['transaction_type'],
-                                data=tx_data.get('data', '')
+                                data=tx_data.get('data', ''),
+                                timestamp=tx_data['timestamp']  # 🔥 关键：使用数据库中的时间戳
                             )
                             tx.transaction_id = tx_data['transaction_hash']
-                            tx.timestamp = tx_data['timestamp']
                             tx.block_number = tx_data['block_number']
                             tx.status = tx_data['status']
                             transactions.append(tx)
@@ -227,6 +229,7 @@ class Blockchain:
                                 timestamp=block_data['timestamp'],
                                 nonce=block_data['nonce']
                             )
+                            # 🔥 关键：使用数据库中存储的哈希
                             block.hash = block_data['block_hash']
                             blocks_dict[block_num] = block
 
@@ -253,14 +256,15 @@ class Blockchain:
                     receiver=tx_data['to_address'],
                     amount=float(tx_data['amount']),
                     transaction_type=tx_data['transaction_type'],
-                    data=tx_data.get('data', '')
+                    data=tx_data.get('data', ''),
+                    timestamp=tx_data['timestamp']  # 🔥 使用数据库时间戳
                 )
                 tx.transaction_id = tx_data['transaction_hash']
-                tx.timestamp = tx_data['timestamp']
                 tx.status = tx_data['status']
                 self.pending_transactions.append(tx)
 
-            print(f"✅ 从数据库加载了 {len(self.pending_transactions)} 笔待处理交易")
+            if self.pending_transactions:
+                print(f"✅ 从数据库加载了 {len(self.pending_transactions)} 笔待处理交易")
 
         except Exception as e:
             print(f"❌ 从数据库加载数据失败: {e}")
@@ -268,31 +272,35 @@ class Blockchain:
             traceback.print_exc()
 
     def create_genesis_block(self) -> None:
-        """创建创世区块（第一个区块）"""
-        if self.chain:  # 如果已经有区块，不重复创建
-            return
-
+        """创建创世区块（第一个区块） - 🔥 固定时间戳版本"""
         print("正在创建创世区块...")
 
-        # 创世区块包含一笔系统发放的交易
+        # 🔥 关键修复：创世交易使用固定时间戳
+        GENESIS_TIMESTAMP = 1633046400  # 固定的创世时间戳
+        
         genesis_transaction = Transaction(
-            sender="0",  # 系统地址
-            receiver="genesis",  # 创世地址
+            sender="0",
+            receiver="genesis",
             amount=1000.0,
-            transaction_type="genesis"
+            transaction_type="genesis",
+            timestamp=GENESIS_TIMESTAMP  # 🔥 使用固定时间戳
         )
 
         genesis_block = Block(
             index=0,
             transactions=[genesis_transaction],
             previous_hash="0" * 64,
-            timestamp=1633046400,
+            timestamp=GENESIS_TIMESTAMP,  # 🔥 使用固定时间戳
             nonce=0
         )
 
-        # 🔧 修复：创世区块也需要正确计算哈希
+        # 计算哈希
         genesis_block.hash = genesis_block.calculate_hash()
         self.chain.append(genesis_block)
+
+        print(f"✅ 创世区块创建完成！")
+        print(f"   哈希: {genesis_block.hash}")
+        print(f"   时间戳: {GENESIS_TIMESTAMP}")
 
         # 保存创世区块到数据库
         if self.db and self.db.is_connected:
@@ -331,9 +339,7 @@ class Blockchain:
 
                 print("✅ 创世区块已保存到数据库")
             except Exception as e:
-                print(f"❌ 保存创世区块到数据库失败: {e}")
-
-        print("创世区块创建完成！")
+                print(f"⚠️ 保存创世区块到数据库失败 (可能已存在): {e}")
 
     def add_transaction(self, transaction: Transaction, signature: str = None) -> bool:
         """
@@ -612,7 +618,7 @@ class Blockchain:
         return self.chain[-1] if self.chain else None
 
     def is_chain_valid(self) -> bool:
-        """验证区块链的完整性 - 🔧 修复版本"""
+        """验证区块链的完整性"""
         print("\n" + "="*60)
         print("正在验证区块链...")
         print("="*60)
@@ -654,10 +660,8 @@ class Blockchain:
                 print(f"   实际: {current_block.previous_hash[:20]}...")
                 return False
 
-            # 检查3: 哈希是否被篡改 - 🔧 修复：使用当前nonce重新计算
-            # 保存原始哈希
+            # 检查3: 哈希是否被篡改
             original_hash = current_block.hash
-            # 重新计算哈希（使用当前的nonce）
             calculated_hash = current_block.calculate_hash()
             
             if original_hash != calculated_hash:
