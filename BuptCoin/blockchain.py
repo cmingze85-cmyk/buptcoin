@@ -77,7 +77,7 @@ class Block:
         self.hash = self.calculate_hash()
 
     def calculate_hash(self) -> str:
-        """计算区块的哈希值（包含默克尔根）"""
+        """计算区块的哈希值（包含默克尔根和nonce）"""
         block_data = {
             'index': self.index,
             'timestamp': self.timestamp,
@@ -286,9 +286,11 @@ class Blockchain:
             index=0,
             transactions=[genesis_transaction],
             previous_hash="0" * 64,
-            timestamp=1633046400
+            timestamp=1633046400,
+            nonce=0
         )
 
+        # 🔧 修复：创世区块也需要正确计算哈希
         genesis_block.hash = genesis_block.calculate_hash()
         self.chain.append(genesis_block)
 
@@ -610,45 +612,78 @@ class Blockchain:
         return self.chain[-1] if self.chain else None
 
     def is_chain_valid(self) -> bool:
-        """验证区块链的完整性"""
+        """验证区块链的完整性 - 🔧 修复版本"""
+        print("\n" + "="*60)
         print("正在验证区块链...")
+        print("="*60)
 
         if len(self.chain) == 0:
+            print("区块链为空")
             return True
 
         # 验证创世区块
         genesis_block = self.chain[0]
         if genesis_block.index != 0:
-            print(f"错误：创世区块索引不是0")
+            print(f"❌ 错误：创世区块索引应为0，实际为{genesis_block.index}")
             return False
+        
+        if genesis_block.previous_hash != "0" * 64:
+            print(f"❌ 错误：创世区块的前驱哈希格式错误")
+            return False
+
+        print(f"✅ 创世区块验证通过 (索引: {genesis_block.index})")
 
         # 验证每个区块
         for i in range(1, len(self.chain)):
             current_block = self.chain[i]
             previous_block = self.chain[i - 1]
 
-            # 检查区块索引是否连续
+            print(f"\n检查区块 #{current_block.index}...")
+
+            # 检查1: 区块索引是否连续
             if current_block.index != previous_block.index + 1:
-                print(f"错误：区块索引不连续")
+                print(f"❌ 错误：区块索引不连续")
+                print(f"   前一个区块: #{previous_block.index}")
+                print(f"   当前区块: #{current_block.index}")
                 return False
 
-            # 检查前驱哈希
+            # 检查2: 前驱哈希是否正确
             if current_block.previous_hash != previous_block.hash:
-                print(f"错误：区块 #{current_block.index} 的前驱哈希不正确")
+                print(f"❌ 错误：区块 #{current_block.index} 的前驱哈希不匹配")
+                print(f"   期望: {previous_block.hash[:20]}...")
+                print(f"   实际: {current_block.previous_hash[:20]}...")
                 return False
 
-            # 检查哈希是否被篡改
+            # 检查3: 哈希是否被篡改 - 🔧 修复：使用当前nonce重新计算
+            # 保存原始哈希
+            original_hash = current_block.hash
+            # 重新计算哈希（使用当前的nonce）
             calculated_hash = current_block.calculate_hash()
-            if current_block.hash != calculated_hash:
-                print(f"错误：区块 #{current_block.index} 的哈希值被篡改")
+            
+            if original_hash != calculated_hash:
+                print(f"❌ 错误：区块 #{current_block.index} 的哈希值不匹配（可能被篡改）")
+                print(f"   存储的哈希: {original_hash[:20]}...")
+                print(f"   计算的哈希: {calculated_hash[:20]}...")
+                print(f"   Nonce: {current_block.nonce}")
                 return False
 
-            # 检查工作量证明
+            # 检查4: 工作量证明是否有效
             if current_block.hash[:self.difficulty] != '0' * self.difficulty:
-                print(f"错误：区块 #{current_block.index} 的工作量证明无效")
+                print(f"❌ 错误：区块 #{current_block.index} 的工作量证明无效")
+                print(f"   要求难度: {self.difficulty}")
+                print(f"   哈希前缀: {current_block.hash[:self.difficulty]}")
                 return False
 
-        print("✅ 区块链验证通过！")
+            print(f"✅ 区块 #{current_block.index} 验证通过")
+            print(f"   哈希: {current_block.hash[:20]}...")
+            print(f"   Nonce: {current_block.nonce}")
+            print(f"   交易数: {len(current_block.transactions)}")
+
+        print("\n" + "="*60)
+        print("✅ 区块链验证完全通过！所有区块都是有效的！")
+        print(f"   总区块数: {len(self.chain)}")
+        print(f"   难度: {self.difficulty}")
+        print("="*60 + "\n")
         return True
 
     def to_dict(self) -> Dict:
